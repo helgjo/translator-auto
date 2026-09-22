@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Русско-эстонский переводчик с голосовым вводом</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f3f5f7;color:#1f2937}
+.app{max-width:760px;margin:auto;padding:18px}
+h1{text-align:center;font-size:25px;margin:10px 0 20px}
+.card{background:#fff;border-radius:16px;padding:16px;margin-bottom:16px;box-shadow:0 4px 18px #00000012}
+label{display:block;font-weight:bold;margin-bottom:8px}
+textarea{width:100%;min-height:140px;resize:vertical;border:1px solid #d1d5db;border-radius:12px;padding:12px;font-size:18px;line-height:1.45}
+.buttons{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+button{border:0;border-radius:10px;padding:12px 14px;font-size:16px;cursor:pointer;background:#e5e7eb}
+button.primary{background:#2563eb;color:white}
+button.recording{background:#dc2626;color:white}
+button:disabled{opacity:.55;cursor:not-allowed}
+.status{margin-top:10px;min-height:22px;color:#4b5563;font-size:14px}
+.hint{font-size:13px;color:#6b7280;margin-top:10px;line-height:1.4}
+</style>
+</head>
+<body>
+<div class="app">
+<h1>Русско-эстонский переводчик</h1>
+
+<section class="card">
+<label for="source">Русский текст</label>
+<textarea id="source" placeholder="Введите текст или нажмите «🎙️ Говорить»"></textarea>
+<div class="buttons">
+<button id="voiceBtn">🎙️ Говорить</button>
+<button id="clearBtn">🗑️ Очистить</button>
+</div>
+<div id="status" class="status"></div>
+<div class="hint">Нажмите «Говорить», разрешите доступ к микрофону и говорите по-русски. Для голосового ввода на Android лучше использовать Chrome.</div>
+</section>
+
+<section class="card">
+<label for="result">Перевод на эстонский</label>
+<textarea id="result" readonly placeholder="Здесь появится перевод"></textarea>
+<div class="buttons">
+<button id="translateBtn" class="primary">Перевести</button>
+<button id="speakBtn">🔊 Озвучить</button>
+<button id="copyBtn">📋 Копировать</button>
+</div>
+</section>
+</div>
+
+<script>
+const source=document.getElementById('source');
+const result=document.getElementById('result');
+const voiceBtn=document.getElementById('voiceBtn');
+const translateBtn=document.getElementById('translateBtn');
+const speakBtn=document.getElementById('speakBtn');
+const clearBtn=document.getElementById('clearBtn');
+const copyBtn=document.getElementById('copyBtn');
+const status=document.getElementById('status');
+
+let recognition=null;
+let listening=false;
+let finalText='';
+
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+
+if(SpeechRecognition){
+  recognition=new SpeechRecognition();
+  recognition.lang='ru-RU';
+  recognition.continuous=true;
+  recognition.interimResults=true;
+
+  recognition.onstart=()=>{
+    listening=true;
+    finalText=source.value;
+    voiceBtn.textContent='⏹️ Остановить';
+    voiceBtn.classList.add('recording');
+    status.textContent='Слушаю… Говорите по-русски.';
+  };
+
+  recognition.onresult=(event)=>{
+    let interim='';
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const transcript=event.results[i][0].transcript;
+      if(event.results[i].isFinal){
+        finalText+=(finalText?' ':'')+transcript.trim();
+      }else{
+        interim+=transcript;
+      }
+    }
+    source.value=(finalText+' '+interim).trim();
+  };
+
+  recognition.onerror=(event)=>{
+    const messages={
+      'not-allowed':'Доступ к микрофону запрещён. Разрешите микрофон для браузера.',
+      'no-speech':'Речь не обнаружена. Попробуйте ещё раз.',
+      'audio-capture':'Микрофон не найден.',
+      'network':'Ошибка сети при распознавании речи.'
+    };
+    status.textContent=messages[event.error]||('Ошибка распознавания: '+event.error);
+  };
+
+  recognition.onend=()=>{
+    listening=false;
+    voiceBtn.textContent='🎙️ Говорить';
+    voiceBtn.classList.remove('recording');
+    if(!status.textContent.startsWith('Ошибка') && !status.textContent.includes('запрещён')){
+      status.textContent='Готово. Текст распознан.';
+    }
+  };
+
+  voiceBtn.onclick=()=>{
+    if(listening){
+      recognition.stop();
+    }else{
+      finalText=source.value.trim();
+      status.textContent='';
+      try{recognition.start()}catch(e){}
+    }
+  };
+}else{
+  voiceBtn.disabled=true;
+  status.textContent='Этот браузер не поддерживает голосовой ввод. Откройте файл в Chrome.';
+}
+
+translateBtn.onclick=async()=>{
+  const text=source.value.trim();
+  if(!text){
+    status.textContent='Сначала введите или продиктуйте текст.';
+    return;
+  }
+  result.value='Перевод выполняется…';
+  translateBtn.disabled=true;
+  try{
+    const url='https://api.mymemory.translated.net/get?q='+encodeURIComponent(text)+'&langpair=ru|et';
+    const response=await fetch(url);
+    if(!response.ok)throw new Error('network');
+    const data=await response.json();
+    result.value=data.responseData?.translatedText||'Перевод не найден.';
+    status.textContent='Перевод готов.';
+  }catch(e){
+    result.value='';
+    status.textContent='Не удалось выполнить перевод. Проверьте интернет-соединение.';
+  }finally{
+    translateBtn.disabled=false;
+  }
+};
+
+speakBtn.onclick=()=>{
+  const text=result.value.trim();
+  if(!text||text==='Перевод выполняется…')return;
+  if(!('speechSynthesis' in window)){
+    status.textContent='Озвучивание не поддерживается этим браузером.';
+    return;
+  }
+  speechSynthesis.cancel();
+  const utterance=new SpeechSynthesisUtterance(text);
+  utterance.lang='et-EE';
+  utterance.rate=0.9;
+  speechSynthesis.speak(utterance);
+};
+
+copyBtn.onclick=async()=>{
+  if(!result.value.trim())return;
+  try{
+    await navigator.clipboard.writeText(result.value);
+    status.textContent='Перевод скопирован.';
+  }catch(e){
+    result.select();
+    document.execCommand('copy');
+    status.textContent='Перевод скопирован.';
+  }
+};
+
+clearBtn.onclick=()=>{
+  if(listening)recognition.stop();
+  source.value='';
+  result.value='';
+  finalText='';
+  status.textContent='';
+  if('speechSynthesis' in window)speechSynthesis.cancel();
+};
+</script>
+</body>
+</html>
